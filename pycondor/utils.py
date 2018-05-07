@@ -137,13 +137,13 @@ def get_condor_version():
     condor_info_str = None
     try:
         import htcondor
-        condor_info_str = htcondor.version()
+        condor_info_str = str(htcondor.version())
     except ImportError:
         assert_command_exists('condor_version')
         proc = subprocess.Popen(['condor_version'], stdout=subprocess.PIPE,
                                 shell=True)
         out, err = proc.communicate()
-        condor_info_str = out
+        condor_info_str = str(out)
     finally:
         if condor_info_str is None:
             raise OSError('Could not find HTCondor version.')

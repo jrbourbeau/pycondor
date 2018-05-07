@@ -1,41 +1,34 @@
+sudo: required
+
 language: python
+
+services:
+    - docker
+
 python:
     - "2.7"
     - "3.4"
     - "3.5"
     - "3.6"
 
-install:
-    - sudo apt-get update
-    # We do this conditionally because it saves us some downloading if the
-    # version is the same.
-    - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
-        wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh;
-      else
-        wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
-      fi
-    - bash miniconda.sh -b -p $HOME/miniconda
-    - export PATH="$HOME/miniconda/bin:$PATH"
-    - hash -r
-    - conda config --set always_yes yes --set changeps1 no
-    - conda update -q conda
-    # Useful for debugging any issues with conda
-    - conda info -a
-    - conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION
-    - source activate test-environment
-
-    - pip install .
-    - pip install -r requirements/docs.txt
-    - pip install -r requirements/test.txt
-
 script:
-    - pytest --cov=pycondor -m "not needs_condor" pycondor
-    - flake8 pycondor
+    # From https://docs.codecov.io/docs/testing-with-docker
+    - mkdir shared
+    - docker build -t pycondor_docker -f ci/Dockerfile --build-arg python_version=${TRAVIS_PYTHON_VERSION} .
+    - docker run -d --name test_container -v "$PWD/shared:/shared" pycondor_docker
+    - docker ps -a
+    - docker exec --user 1000:1000 test_container bash ci/run_tests.sh
+    - docker exec test_container mv .coverage /shared
+    - mv shared/.coverage .
+    - bash <(curl -s https://codecov.io/bash)
+    # Debugging
+    - docker exec test_container condor_status
+    - docker exec test_container ps -ef | grep condor
+    - docker exec test_container condor_config_val -config -verbose LOG
+    - docker exec test_container condor_config_val -verbose COLLECTOR_HOST
+    # Want to make sure documentation can be successfully built
+    - pip install .
     - bash ci/build_docs.sh
-
-after_success:
-    - pip install codecov
-    - codecov
 
 deploy:
     provider: pages
