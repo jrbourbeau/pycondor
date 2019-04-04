@@ -196,9 +196,12 @@ def monitor(time_, length, prog_char, file):
                                         prog_char=prog_char)
             sys.stdout.write(prog_str)
             sys.stdout.flush()
-            # Exit if all jobs are either Done or Failed
-            n_finished = current_status.Done + current_status.Failed
-            if n_finished == sum(current_status) and sum(current_status) != 0:
+            # Exit if at least one job is Done or Failed (something ran) and
+            # all jobs either Done, Failed, or UnReady (nothing left to run)
+            n_jobs = sum(current_status)
+            n_ran = current_status.Done + current_status.Failed
+            n_finished = n_ran + current_status.UnReady
+            if n_jobs and n_ran and n_finished == n_jobs:
                 sys.exit(0)
             else:
                 time.sleep(time_)
