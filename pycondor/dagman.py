@@ -284,7 +284,7 @@ class Dagman(BaseNode):
             return self
 
         name = self._get_fancyname() if fancyname else self.name
-        submit_file = os.path.join(self.submit, '{}.submit'.format(name))
+        submit_file = os.path.join(self.submit, '{}.dag'.format(name))
         self.submit_file = submit_file
         self.submit_name = name
         checkdir(self.submit_file, makedirs)

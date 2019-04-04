@@ -93,7 +93,7 @@ def test_get_subdag_string(tmpdir, dagman):
     submit_dir = os.path.dirname(dagman.submit_file)
     subdag_str = _get_subdag_string(dagman)
 
-    expected_str = 'SUBDAG EXTERNAL {} {}.submit'.format(
+    expected_str = 'SUBDAG EXTERNAL {} {}.dag'.format(
                         dagman.name,
                         os.path.join(submit_dir, dagman.name))
 
