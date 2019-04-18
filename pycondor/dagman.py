@@ -9,6 +9,21 @@ from .job import Job
 from .visualize import visualize as _visualize
 
 
+VAR_ATTR = ['executable',
+            'error',
+            'log',
+            'output',
+            'request_memory',
+            'request_disk',
+            'request_cpus',
+            'getenv',
+            'universe',
+            'initialdir',
+            'notification',
+            'requirements',
+            ]
+
+
 def _get_subdag_string(dagman):
 
     if not isinstance(dagman, Dagman):
@@ -21,7 +36,7 @@ def _get_subdag_string(dagman):
     return subdag_string
 
 
-def _iter_job_args(job):
+def _iter_job_args(job, single_file=False):
     """
     Iterates over Job args list. Yields the name (and JobArg) for each node
     to be used when adding job to a Dagman (i.e. the name in the
@@ -31,7 +46,10 @@ def _iter_job_args(job):
     ----------
     job : Job
         Job to iterate over. Note that the submit file for job must be built
-        prior to using _iter_job_args.
+        prior to using _iter_job_args in non-single_file mode
+
+    single_file : single_file
+        When this is true, single job submit file is expected.  Default is False.
 
     Yields
     ------
@@ -42,9 +60,11 @@ def _iter_job_args(job):
     """
     if not isinstance(job, Job):
         raise TypeError('Expecting a Job object, got {}'.format(type(job)))
-    if not getattr(job, '_built', False):
-        raise ValueError('Job {} must be built before adding it '
-                         'to a Dagman'.format(job.name))
+
+    if not single_file:
+        if not getattr(job, '_built', False):
+            raise ValueError('Job {} must be built before adding it '
+                             'to a Dagman'.format(job.name))
 
     if len(job.args) == 0:
         return
@@ -58,7 +78,7 @@ def _iter_job_args(job):
             yield node_name, job_arg
 
 
-def _get_parent_child_string(node):
+def _get_parent_child_string(node, single_file=False):
     """Constructs the parent/child line for node to be added to a Dagman
     """
 
@@ -69,14 +89,14 @@ def _get_parent_child_string(node):
     parent_string = 'Parent'
     for parent_node in node.parents:
         if isinstance(parent_node, Job) and len(parent_node) > 0:
-            for node_name, job_arg in _iter_job_args(parent_node):
+            for node_name, job_arg in _iter_job_args(parent_node, single_file):
                 parent_string += ' {}'.format(node_name)
         else:
             parent_string += ' {}'.format(parent_node.submit_name)
 
     child_string = 'Child'
     if isinstance(node, Job) and len(node) > 0:
-        for node_name, job_arg in _iter_job_args(node):
+        for node_name, job_arg in _iter_job_args(node, single_file):
             child_string += ' {}'.format(node_name)
     else:
         child_string += ' {}'.format(node.submit_name)
@@ -214,29 +234,50 @@ class Dagman(BaseNode):
 
         return self
 
-    def _get_job_arg_lines(self, job, fancyname):
+    def _get_job_arg_lines(self, job, single_file=False):
         """Constructs the lines to be added to a Dagman related to job
         """
 
         if not isinstance(job, Job):
             raise TypeError('Expecting a Job object, got {}'.format(type(job)))
-        if not getattr(job, '_built', False):
-            raise ValueError('Job {} must be built before adding it '
-                             'to a Dagman'.format(job.name))
+
+        if not single_file:
+            if not getattr(job, '_built', False):
+                raise ValueError('Job {} must be built before adding it '
+                                 'to a Dagman'.format(job.name))
+
+        def _add_common_args(n_name):
+            if single_file:
+                for attr in VAR_ATTR + ['queue']:
+                    job_attr = getattr(job, attr, None)
+                    if job_attr is not None:
+                        if attr in ('output', 'error', 'log'):
+                            file_path = os.path.join(job_attr,
+                                                     '{}.{}'.format(n_name, attr))
+                            var_line = 'VARS {} {}="{}"'.format(n_name, attr.upper(), file_path)
+                        else:
+                            var_line = 'VARS {} {}="{}"'.format(n_name, attr.upper(), job_attr)
+                        job_arg_lines.append(var_line)
 
         job_arg_lines = []
-        if len(job.args) == 0:
-            job_line = 'JOB {} {}'.format(job.submit_name, job.submit_file)
-            job_arg_lines.append(job_line)
+        if not single_file:
+            submit_file = job.submit_file
         else:
-            for node_name, job_arg in _iter_job_args(job):
+            submit_file = self.job_submit_file
+        if len(job.args) == 0:
+            job_line = 'JOB {} {}'.format(job.submit_name, submit_file)
+            job_arg_lines.append(job_line)
+
+            _add_common_args(job.submit_name)
+        else:
+            for node_name, job_arg in _iter_job_args(job, single_file=single_file):
                 # Check that '.' or '+' are not in node_name
                 if '.' in node_name or '+' in node_name:
                     self._has_bad_node_names = True
 
                 arg, name, retry = job_arg
                 # Add JOB line with Job submit file
-                job_line = 'JOB {} {}'.format(node_name, job.submit_file)
+                job_line = 'JOB {} {}'.format(node_name, submit_file)
                 job_arg_lines.append(job_line)
                 # Add job ARGS line for command line arguments
                 arg_line = 'VARS {} ARGS="{}"'.format(node_name, arg)
@@ -250,6 +291,9 @@ class Dagman(BaseNode):
                     job_name_line = 'VARS {} job_name="{}"'.format(node_name,
                                                                    job_name)
                     job_arg_lines.append(job_name_line)
+
+                _add_common_args(node_name)
+
                 # Add retry line for Job
                 if retry is not None:
                     retry_line = 'Retry {} {}'.format(node_name, retry)
@@ -257,7 +301,7 @@ class Dagman(BaseNode):
 
         return job_arg_lines
 
-    def build(self, makedirs=True, fancyname=True):
+    def build(self, makedirs=True, fancyname=True, single_file=False):
         """Build and saves the submit file for Dagman
 
         Parameters
@@ -289,11 +333,31 @@ class Dagman(BaseNode):
         self.submit_name = name
         checkdir(self.submit_file, makedirs)
 
+        if single_file:
+            # in single file mode, write the single job submit file
+            job_submit_file = os.path.join(self.submit, '{}_job.submit'.format(name))
+            self.job_submit_file = job_submit_file
+            checkdir(self.job_submit_file, makedirs)
+
+            if not os.path.exists(job_submit_file):
+                # Write lines to the single job submit file
+                with open(job_submit_file, 'w') as file:
+                    job_submit_lines = [
+                            '{} = $({})'.format(attr, attr.upper()) for attr in VAR_ATTR]
+                    job_submit_lines.append('arguments = $(ARGS)')
+                    job_submit_lines.append('queue $(queue)')
+                    file.writelines('\n'.join(job_submit_lines))
+
         # Build submit files for all nodes in self.nodes
         # Note: nodes must be built before the submit file for self is built
         for node_index, node in enumerate(self.nodes, start=1):
             if isinstance(node, Job):
-                node._build_from_dag(makedirs, fancyname)
+                if not single_file:
+                    node._build_from_dag(makedirs, fancyname)
+                else:
+                    name = node._get_fancyname() if fancyname else node.name
+                    node.submit_name = name
+                    node._has_arg_names = any([arg.name for arg in node.args])
             elif isinstance(node, Dagman):
                 node.build(makedirs, fancyname)
             else:
@@ -310,7 +374,7 @@ class Dagman(BaseNode):
             # Build the BaseNode submit file
             if isinstance(node, Job):
                 # Add Job variables to Dagman submit file
-                job_arg_lines = self._get_job_arg_lines(node, fancyname)
+                job_arg_lines = self._get_job_arg_lines(node, single_file)
                 lines.extend(job_arg_lines)
             elif isinstance(node, Dagman):
                 subdag_string = _get_subdag_string(node)
@@ -319,7 +383,7 @@ class Dagman(BaseNode):
                 raise TypeError('Nodes must be either a Job or Dagman object')
             # Add parent/child information, if necessary
             if node.hasparents():
-                parent_child_string = _get_parent_child_string(node)
+                parent_child_string = _get_parent_child_string(node, single_file=single_file)
                 parent_child_lines.append(parent_child_string)
 
         # Add any extra lines to submit file, if specified
@@ -383,7 +447,7 @@ class Dagman(BaseNode):
         return self
 
     @requires_command('condor_submit_dag')
-    def build_submit(self, makedirs=True, fancyname=True, submit_options=None):
+    def build_submit(self, makedirs=True, fancyname=True, submit_options=None, single_file=False):
         """Calls build and submit sequentially
 
         Parameters
@@ -404,12 +468,15 @@ class Dagman(BaseNode):
             <http://research.cs.wisc.edu/htcondor/manual/current/condor_submit_dag.html>`_
             for possible options).
 
+        single_file: bool, optional
+            When it's true, single job submission file will be generated.  Default is False.
+
         Returns
         -------
         self : object
             Returns self.
         """
-        self.build(makedirs, fancyname)
+        self.build(makedirs, fancyname, single_file=single_file)
         self.submit_dag(submit_options=submit_options)
 
         return self

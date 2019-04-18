@@ -1,8 +1,11 @@
 
-import os
-from collections import Counter
 import filecmp
+import os
+import re
+from collections import Counter
+
 import pytest
+
 from pycondor import Job, Dagman
 from pycondor.dagman import _iter_job_args, _get_subdag_string
 from pycondor.utils import clear_pycondor_environment_variables
@@ -194,7 +197,7 @@ def test_repr():
 def test_get_job_arg_lines_non_job_raises():
     not_job = 'not a job'
     with pytest.raises(TypeError) as excinfo:
-        Dagman('dag_name')._get_job_arg_lines(not_job, fancyname=True)
+        Dagman('dag_name')._get_job_arg_lines(not_job)
     error = 'Expecting a Job object, got {}'.format(type(not_job))
     assert error == str(excinfo.value)
 
@@ -202,7 +205,7 @@ def test_get_job_arg_lines_non_job_raises():
 def test_get_job_arg_lines_not_built_raises():
     job = Job('testjob', example_script)
     with pytest.raises(ValueError) as excinfo:
-        Dagman('dag_name')._get_job_arg_lines(job, fancyname=True)
+        Dagman('dag_name')._get_job_arg_lines(job)
     error = ('Job {} must be built before adding it to a '
              'Dagman'.format(job.name))
     assert error == str(excinfo.value)
@@ -293,3 +296,29 @@ def test_dagman_add_node_ignores_duplicates(tmpdir, dagman):
     dagman.add_job(job)
 
     assert dagman.nodes == [job]
+
+
+def test_dagman_build_single_file(tmpdir):
+    submit_dir = str(tmpdir.join('submit'))
+
+    extra_lines = ['first extra line', 'second extra line']
+    dagman = Dagman('dagman', submit=submit_dir, extra_lines=extra_lines)
+
+    job1 = Job('testjob1', example_script, submit=submit_dir)
+    job2 = Job('testjob2', example_script, submit=submit_dir)
+    dagman.add_job(job1)
+    dagman.add_job(job2)
+
+    dagman.build(single_file=True)
+
+    with open(dagman.submit_file, 'r') as f:
+        lines = f.readlines()
+
+        # make sure the job1 & job2 are in the same submit file
+
+        assert re.match(r'JOB testjob1.*', lines[0])
+        assert re.match(r'VARS testjob1.*EXECUTABLE.*example_script\.py', lines[1])
+        assert re.match(r'JOB testjob2.*', lines[2])
+        assert re.match(r'VARS testjob2.*EXECUTABLE.*example_script\.py', lines[3])
+        assert re.match(r'first extra line', lines[4])
+        assert re.match(r'second extra line', lines[5])
