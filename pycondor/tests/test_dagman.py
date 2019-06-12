@@ -4,7 +4,8 @@ from collections import Counter
 import filecmp
 import pytest
 from pycondor import Job, Dagman
-from pycondor.dagman import _iter_job_args, _get_subdag_string
+from pycondor.dagman import (_iter_job_args, _get_subdag_string,
+                             format_dag_node_name, format_job_name_variable)
 from pycondor.utils import clear_pycondor_environment_variables
 
 clear_pycondor_environment_variables()
@@ -18,6 +19,13 @@ def dagman(tmpdir_factory):
     submit_dir = str(tmpdir_factory.mktemp('submit'))
     dagman = Dagman('exampledagman', submit=submit_dir)
     return dagman
+
+
+@pytest.fixture()
+def job(tmpdir_factory):
+    submit_dir = str(tmpdir_factory.mktemp('submit'))
+    job = Job('examplejob', example_script, submit=submit_dir)
+    return job
 
 
 def test_add_job_int_fail():
@@ -108,11 +116,8 @@ def test_iter_job_args(tmpdir):
     job.add_arg('argument1', name='arg1')
     job.add_arg('argument2')
     job.build()
-    for idx, (node_name, jobarg) in enumerate(_iter_job_args(job)):
-        if jobarg.name is not None:
-            assert node_name == '{}_{}'.format(job.submit_name, jobarg.name)
-        else:
-            assert node_name == '{}_arg_{}'.format(job.submit_name, idx)
+    for idx, (node_name, job_name, jobarg) in enumerate(_iter_job_args(job)):
+        assert node_name == '{}_arg_{}'.format(job.submit_name, idx)
 
 
 def test_iter_job_args_fail(tmpdir):
@@ -122,7 +127,7 @@ def test_iter_job_args_fail(tmpdir):
     job = Job('testjob', example_script, submit=submit_dir)
     with pytest.raises(ValueError) as excinfo:
         i = _iter_job_args(job)
-        node_name, arg = next(i)
+        node_name, job_name, arg = next(i)
     error = ('Job {} must be built before adding it to a '
              'Dagman'.format(job.name))
     assert error == str(excinfo.value)
@@ -131,13 +136,13 @@ def test_iter_job_args_fail(tmpdir):
     job.build()
     with pytest.raises(StopIteration):
         i = _iter_job_args(job)
-        node_name, arg = next(i)
+        node_name, job_name, arg = next(i)
 
     # Check _iter_job_args raises a TypeError when input is not a Job
     with pytest.raises(TypeError) as excinfo:
         not_job = 'thisisastring'
         i = _iter_job_args(not_job)
-        node_name, arg = next(i)
+        node_name, job_name, arg = next(i)
     error = 'Expecting a Job object, got {}'.format(type(not_job))
     assert error == str(excinfo.value)
 
@@ -208,22 +213,20 @@ def test_get_job_arg_lines_not_built_raises():
     assert error == str(excinfo.value)
 
 
-def test_dagman_has_bad_node_names(tmpdir):
+@pytest.mark.parametrize('job_name, arg_name, bad_node_names', [
+    ('testjob', 'argname', False),
+    ('testjob.', 'argname', True),
+    ('testjob', 'argname+', False),
+    ('testjob+', 'argname.', True),
+])
+def test_dagman_has_bad_node_names(tmpdir, job_name, arg_name, bad_node_names):
     submit_dir = str(tmpdir.mkdir('submit'))
-
-    # Test all combinations
-    jobs_names = ['testjob', 'testjob.', 'testjob', 'testjob+']
-    arg_names = ['argname', 'argname', 'argname+', 'argname.']
-    has_bad_node_names = [False, True, True, True]
-    for job_name, arg_name, bad_node_names in zip(jobs_names,
-                                                  arg_names,
-                                                  has_bad_node_names):
-        job = Job(job_name, example_script, submit=submit_dir)
-        job.add_arg('arg', name=arg_name)
-        dagman = Dagman('testdagman', submit=submit_dir)
-        dagman.add_job(job)
-        dagman.build()
-        assert dagman._has_bad_node_names == bad_node_names
+    job = Job(job_name, example_script, submit=submit_dir)
+    job.add_arg('arg', name=arg_name)
+    dagman = Dagman('testdagman', submit=submit_dir)
+    dagman.add_job(job)
+    dagman.build()
+    assert dagman._has_bad_node_names == bad_node_names
 
 
 def test_dagman_env_variable_dir(tmpdir, monkeypatch):
@@ -293,3 +296,56 @@ def test_dagman_add_node_ignores_duplicates(tmpdir, dagman):
     dagman.add_job(job)
 
     assert dagman.nodes == [job]
+
+
+def test_format_dag_node_name(job):
+    job.build(fancyname=False)  # Need submit_name attribute
+    name = 'arg_5'
+    arg_num = 5
+    node_name = format_dag_node_name(job, name, arg_num)
+    expected = '{}_arg_{}'.format(job.submit_name, arg_num)
+    assert node_name == expected
+
+
+@pytest.mark.parametrize('arg_name, arg_num, expected', [
+    ('my-custom-name', 7, 'examplejob_my-custom-name'),
+    (None, 3, 'examplejob_arg_3'),
+])
+def test_format_job_name_variable(job, arg_name, arg_num, expected):
+    job.build(fancyname=False)  # Need submit_name attribute
+    job_name = format_job_name_variable(job, arg_name, arg_num)
+    assert job_name == expected
+
+
+def test_example_dag_node_names(job, dagman):
+    job.add_arg('--myarg', name='custom-name')
+    job.add_arg('--myotherarg')
+    dagman.add_job(job)
+    dagman.build(fancyname=False)
+
+    job_submit_file = job.submit_file
+
+    expected = """
+    JOB examplejob_arg_0 {job_submit_file}
+    VARS examplejob_arg_0 ARGS="--myarg"
+    VARS examplejob_arg_0 job_name="examplejob_custom-name"
+    JOB examplejob_arg_1 {job_submit_file}
+    VARS examplejob_arg_1 ARGS="--myotherarg"
+    VARS examplejob_arg_1 job_name="examplejob_arg_1"
+
+    #Inter-job dependencies
+    """.format(job_submit_file=job_submit_file)
+    expected = expected.splitlines()
+
+    with open(dagman.submit_file, 'r') as f:
+        result = f.readlines()
+
+    # Remove leading / trailing whitespace
+    result = [line.strip() for line in result]
+    expected = [line.strip() for line in expected]
+
+    # Remove empty lines
+    expected = [line for line in expected if line != '']
+    result = [line for line in result if line != '']
+
+    assert result == expected

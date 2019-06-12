@@ -21,6 +21,20 @@ def _get_subdag_string(dagman):
     return subdag_string
 
 
+def format_dag_node_name(job, arg_name, arg_num):
+    node_name = '{}_arg_{}'.format(job.submit_name, arg_num)
+    return node_name
+
+
+def format_job_name_variable(job, arg_name, arg_num):
+    if arg_name is not None:
+        job_name = '{}_{}'.format(job.submit_name, arg_name)
+    else:
+        job_name = '{}_arg_{}'.format(job.submit_name, arg_num)
+
+    return job_name
+
+
 def _iter_job_args(job):
     """
     Iterates over Job args list. Yields the name (and JobArg) for each node
@@ -37,6 +51,8 @@ def _iter_job_args(job):
     ------
     node_name : str
         Node name to use in Dagman object.
+    job_name : str
+        job_name variable to be used for output file paths.
     job_arg : JobArg namedtuple
         Job argument object (``arg``, ``name``, ``retry`` attributes).
     """
@@ -46,16 +62,12 @@ def _iter_job_args(job):
         raise ValueError('Job {} must be built before adding it '
                          'to a Dagman'.format(job.name))
 
-    if len(job.args) == 0:
-        return
-    else:
-        for idx, job_arg in enumerate(job):
-            arg, name, retry = job_arg
-            if name is not None:
-                node_name = '{}_{}'.format(job.submit_name, name)
-            else:
-                node_name = '{}_arg_{}'.format(job.submit_name, idx)
-            yield node_name, job_arg
+    for arg_num, job_arg in enumerate(job):
+        arg, name, retry = job_arg
+        node_name = format_dag_node_name(job, name, arg_num)
+        job_name = format_job_name_variable(job, name, arg_num)
+
+        yield node_name, job_name, job_arg
 
 
 def _get_parent_child_string(node):
@@ -69,14 +81,14 @@ def _get_parent_child_string(node):
     parent_string = 'Parent'
     for parent_node in node.parents:
         if isinstance(parent_node, Job) and len(parent_node) > 0:
-            for node_name, job_arg in _iter_job_args(parent_node):
+            for node_name, job_name, job_arg in _iter_job_args(parent_node):
                 parent_string += ' {}'.format(node_name)
         else:
             parent_string += ' {}'.format(parent_node.submit_name)
 
     child_string = 'Child'
     if isinstance(node, Job) and len(node) > 0:
-        for node_name, job_arg in _iter_job_args(node):
+        for node_name, job_name, job_arg in _iter_job_args(node):
             child_string += ' {}'.format(node_name)
     else:
         child_string += ' {}'.format(node.submit_name)
@@ -225,11 +237,11 @@ class Dagman(BaseNode):
                              'to a Dagman'.format(job.name))
 
         job_arg_lines = []
-        if len(job.args) == 0:
+        if not job.args:
             job_line = 'JOB {} {}'.format(job.submit_name, job.submit_file)
             job_arg_lines.append(job_line)
         else:
-            for node_name, job_arg in _iter_job_args(job):
+            for node_name, job_name, job_arg in _iter_job_args(job):
                 # Check that '.' or '+' are not in node_name
                 if '.' in node_name or '+' in node_name:
                     self._has_bad_node_names = True
@@ -243,10 +255,6 @@ class Dagman(BaseNode):
                 job_arg_lines.append(arg_line)
                 # Define job_name variable if there are arg_names for job
                 if job._has_arg_names:
-                    if name is not None:
-                        job_name = node_name
-                    else:
-                        job_name = job.submit_name
                     job_name_line = 'VARS {} job_name="{}"'.format(node_name,
                                                                    job_name)
                     job_arg_lines.append(job_name_line)
