@@ -9,6 +9,21 @@ from .job import Job
 from .visualize import visualize as _visualize
 
 
+VAR_ATTR = ['executable',
+            'error',
+            'log',
+            'output',
+            'request_memory',
+            'request_disk',
+            'request_cpus',
+            'getenv',
+            'universe',
+            'initialdir',
+            'notification',
+            'requirements',
+            ]
+
+
 def _get_subdag_string(dagman):
 
     if not isinstance(dagman, Dagman):
@@ -42,9 +57,9 @@ def _iter_job_args(job):
     """
     if not isinstance(job, Job):
         raise TypeError('Expecting a Job object, got {}'.format(type(job)))
-    if not getattr(job, '_built', False):
-        raise ValueError('Job {} must be built before adding it '
-                         'to a Dagman'.format(job.name))
+    # if not getattr(job, '_built', False):
+    #     raise ValueError('Job {} must be built before adding it '
+    #                      'to a Dagman'.format(job.name))
 
     if len(job.args) == 0:
         return
@@ -220,13 +235,13 @@ class Dagman(BaseNode):
 
         if not isinstance(job, Job):
             raise TypeError('Expecting a Job object, got {}'.format(type(job)))
-        if not getattr(job, '_built', False):
-            raise ValueError('Job {} must be built before adding it '
-                             'to a Dagman'.format(job.name))
+        # if not getattr(job, '_built', False):
+        #     raise ValueError('Job {} must be built before adding it '
+        #                      'to a Dagman'.format(job.name))
 
         job_arg_lines = []
         if len(job.args) == 0:
-            job_line = 'JOB {} {}'.format(job.submit_name, job.submit_file)
+            job_line = 'JOB {} {}'.format(job.submit_name, self.job_submit_file)
             job_arg_lines.append(job_line)
         else:
             for node_name, job_arg in _iter_job_args(job):
@@ -236,7 +251,7 @@ class Dagman(BaseNode):
 
                 arg, name, retry = job_arg
                 # Add JOB line with Job submit file
-                job_line = 'JOB {} {}'.format(node_name, job.submit_file)
+                job_line = 'JOB {} {}'.format(node_name, self.job_submit_file)
                 job_arg_lines.append(job_line)
                 # Add job ARGS line for command line arguments
                 arg_line = 'VARS {} ARGS="{}"'.format(node_name, arg)
@@ -250,10 +265,23 @@ class Dagman(BaseNode):
                     job_name_line = 'VARS {} job_name="{}"'.format(node_name,
                                                                    job_name)
                     job_arg_lines.append(job_name_line)
+
+                for attr in VAR_ATTR + ['queue']:
+                    job_attr = getattr(job, attr, None)
+                    if job_attr is not None:
+                        if attr in ['output', 'error', 'log']:
+                            file_path = os.path.join(job_attr,
+                                                     '{}.{}'.format(node_name, attr))
+                            var_line = 'VARS {} {}="{}"'.format(node_name, attr.upper(), file_path)
+                        else:
+                            var_line = 'VARS {} {}="{}"'.format(node_name, attr.upper(), job_attr)
+                        job_arg_lines.append(var_line)
+
                 # Add retry line for Job
                 if retry is not None:
                     retry_line = 'Retry {} {}'.format(node_name, retry)
                     job_arg_lines.append(retry_line)
+
 
         return job_arg_lines
 
@@ -285,15 +313,30 @@ class Dagman(BaseNode):
 
         name = self._get_fancyname() if fancyname else self.name
         submit_file = os.path.join(self.submit, '{}.submit'.format(name))
+        job_submit_file = os.path.join(self.submit, '{}_job.submit'.format(name))
         self.submit_file = submit_file
         self.submit_name = name
         checkdir(self.submit_file, makedirs)
+
+        job_submit_file = os.path.join(self.submit, '{}_job.submit'.format(name))
+        self.job_submit_file = job_submit_file
+        checkdir(self.job_submit_file, makedirs)
+
+        # Write lines to dag submit file
+        with open(job_submit_file, 'w') as file:
+            job_submit_lines = ['{} = $({})'.format(attr, attr.upper()) for attr in VAR_ATTR]
+            job_submit_lines.append('arguments = $(ARGS)')
+            job_submit_lines.append('queue $(queue)')
+            file.writelines('\n'.join(job_submit_lines))
 
         # Build submit files for all nodes in self.nodes
         # Note: nodes must be built before the submit file for self is built
         for node_index, node in enumerate(self.nodes, start=1):
             if isinstance(node, Job):
-                node._build_from_dag(makedirs, fancyname)
+                # node._build_from_dag(makedirs, fancyname)
+                name = node._get_fancyname() if fancyname else node.name
+                node.submit_name = name
+                node._has_arg_names = any([arg.name for arg in node.args])
             elif isinstance(node, Dagman):
                 node.build(makedirs, fancyname)
             else:
