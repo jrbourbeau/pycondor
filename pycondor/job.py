@@ -104,6 +104,10 @@ class Job(BaseNode):
         Level of logging verbosity option are 0-warning, 1-info,
         2-debugging (default is 0).
 
+    add_cluster_job_numbers: bool,
+        If true, the log, output, and error files names will include the
+        condor cluster and job numbers.
+
     Attributes
     ----------
     args : list
@@ -132,7 +136,7 @@ class Job(BaseNode):
                  request_cpus=None, getenv=None, universe=None,
                  initialdir=None, notification=None, requirements=None,
                  queue=None, extra_lines=None, dag=None, arguments=None,
-                 retry=None, verbose=0):
+                 retry=None, verbose=0, add_cluster_job_numbers=False):
 
         super(Job, self).__init__(name, submit, extra_lines, dag, verbose)
 
@@ -149,6 +153,7 @@ class Job(BaseNode):
         self.notification = notification
         self.requirements = requirements
         self.queue = queue
+        self.add_cluster_job_numbers = add_cluster_job_numbers
 
         if retry is not None and not isinstance(retry, int):
             raise TypeError('retry must be an int')
@@ -294,6 +299,9 @@ class Job(BaseNode):
             if self._has_arg_names:
                 file_path = os.path.join(dir_path,
                                          '$(job_name).{}'.format(attr))
+            elif self.add_cluster_job_numbers:
+                file_path = os.path.join(
+                    dir_path, '{}_$(Cluster)_$(Process).{}'.format(name, attr))
             else:
                 file_path = os.path.join(dir_path,
                                          '{}.{}'.format(name, attr))
