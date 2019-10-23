@@ -274,7 +274,7 @@ class Job(BaseNode):
 
         name = self._get_fancyname() if fancyname else self.name
         self.submit_name = name
-        submit_file = os.path.join(self.submit, '{}.submit'.format(name))
+        submit_file = os.path.join(self.submit, '{}.sub'.format(name))
         checkdir(submit_file, makedirs)
         # Add submit_file data member to job for later use
         self.submit_file = submit_file

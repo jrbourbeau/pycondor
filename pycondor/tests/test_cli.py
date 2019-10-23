@@ -136,7 +136,7 @@ def test_submit_equality(tmpdir):
     assert result.exit_code == 0
 
     submit_file_2 = os.path.join(str(tmpdir),
-                                 '{}.submit'.format(name))
+                                 '{}.sub'.format(name))
     with open(submit_file_2, 'r') as f:
         submit_file_2 = f.readlines()
 
@@ -160,7 +160,7 @@ def test_submit_args(tmpdir):
     assert result.exit_code == 0
 
     submit_file = os.path.join(str(tmpdir),
-                               '{}.submit'.format(name))
+                               '{}.sub'.format(name))
     with open(submit_file, 'r') as f:
         submit_file_lines = f.read().splitlines()
 

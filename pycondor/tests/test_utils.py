@@ -90,7 +90,7 @@ def test_parse_condor_version(info):
 
 
 def test_split_command_string():
-    filename = os.path.join('condor', 'submit', 'job.submit')
+    filename = os.path.join('condor', 'submit', 'job.sub')
     command = "condor_submit -maxjobs 1000 -interactive {}".format(filename)
     expected = [
       'condor_submit',
