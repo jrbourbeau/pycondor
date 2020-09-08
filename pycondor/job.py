@@ -63,6 +63,9 @@ class Job(BaseNode):
 
         .. versionadded:: 0.1.0
 
+    request_gpus : int or None, optional
+        Number of GPUs to request in submit file.
+
     getenv : bool or None, optional
         Whether or not to use the current environment settings when running
         the job (default is None).
@@ -129,7 +132,7 @@ class Job(BaseNode):
 
     def __init__(self, name, executable, error=None, log=None, output=None,
                  submit=None, request_memory=None, request_disk=None,
-                 request_cpus=None, getenv=None, universe=None,
+                 request_cpus=None, request_gpus=None, getenv=None, universe=None,
                  initialdir=None, notification=None, requirements=None,
                  queue=None, extra_lines=None, dag=None, arguments=None,
                  retry=None, verbose=0):
@@ -143,6 +146,7 @@ class Job(BaseNode):
         self.request_memory = request_memory
         self.request_disk = request_disk
         self.request_cpus = request_cpus
+        self.request_gpus = request_gpus
         self.getenv = getenv
         self.universe = universe
         self.initialdir = initialdir
@@ -265,8 +269,8 @@ class Job(BaseNode):
 
         lines = []
         submit_attrs = ['universe', 'executable', 'request_memory',
-                        'request_disk', 'request_cpus', 'getenv',
-                        'initialdir', 'notification', 'requirements']
+                        'request_disk', 'request_cpus', 'request_gpus',
+			'getenv', 'initialdir', 'notification', 'requirements']
         for submit_attr in submit_attrs:
             if getattr(self, submit_attr) is not None:
                 submit_attr_str = string_rep(getattr(self, submit_attr))
@@ -278,6 +282,10 @@ class Job(BaseNode):
         checkdir(submit_file, makedirs)
         # Add submit_file data member to job for later use
         self.submit_file = submit_file
+
+        # Add any extra lines to submit file, if specified
+        if self.extra_lines:
+            lines.extend(self.extra_lines)
 
         # Set up log, output, and error files paths
         self._has_arg_names = any([arg.name for arg in self.args])
@@ -300,10 +308,6 @@ class Job(BaseNode):
             lines.append('{} = {}'.format(attr, file_path))
             setattr(self, '{}_file'.format(attr), file_path)
             checkdir(file_path, makedirs)
-
-        # Add any extra lines to submit file, if specified
-        if self.extra_lines:
-            lines.extend(self.extra_lines)
 
         # Add arguments and queue line
         if self.queue is not None and not isinstance(self.queue, int):
